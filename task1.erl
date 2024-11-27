@@ -1,16 +1,16 @@
 -module(task1).
--export([start/0, start/2, conveyor_belt/1, truck/4]).
+-export([start/0, start/3, conveyor_belt/2, truck/4]).
 
 
-start() -> io:format("Please use the following: '~p:start(ConveyorNr, TotalPackageNr)'~n", [?MODULE]).
-start(ConveyorNr, TotalPackageNr) when ConveyorNr < 1 orelse TotalPackageNr < 1  
-    -> {error, "ConveyorNr and TotalPackageNr should be both positives integers!"};
+start() -> io:format("Please use the following: '~p:start(ConveyorNr, TotalPackageNr, MaxTruckCapacity)'~n", [?MODULE]).
+start(ConveyorNr, TotalPackageNr, MaxTruckCapacity) when ConveyorNr < 1 orelse TotalPackageNr < 1 orelse MaxTruckCapacity < 1 
+    -> {error, "ConveyorNr, TotalPackageNr and MaxTruckCapacity should all be positive integers!"};
 
-start(ConveyorsNr, TotalPackageNr) -> 
+start(ConveyorsNr, TotalPackageNr, MaxTruckCapacity) -> 
     register(factory, self()),
     io:format("[ Factory ] Starting with ~p conveyor belts and ~p packages~n", [ConveyorsNr, TotalPackageNr]),
     Conveyors = [
-        {ConveyorId, spawn(?MODULE, conveyor_belt, [ConveyorId])} || ConveyorId <- lists:seq(1, ConveyorsNr)
+        {ConveyorId, spawn(?MODULE, conveyor_belt, [ConveyorId, MaxTruckCapacity])} || ConveyorId <- lists:seq(1, ConveyorsNr)
     ],
     feed_conveyors(Conveyors, TotalPackageNr),
     io:format("[ Factory ] Waiting for conveyors acknowledges~n"),
@@ -41,18 +41,20 @@ wait_for_acks(Rem) ->
 % Conveyor Belt things %
 %%%%%%%%%%%%%%%%%%%%%%%%
 
-conveyor_belt(ConveyorId) -> 
+conveyor_belt(ConveyorId, MaxTruckCapacity) -> 
     io:format("[ Conveyor Belt ~p ] Starting~n", [ConveyorId]),
     case whereis(factory) of
         undefinied -> error("'factory' service not defined");
-        % TODO: Generate truck capacity randomly
         Pid when is_pid(Pid) -> 
+            TruckCapacity = rand:uniform(MaxTruckCapacity),
+            TruckCount = 1,
             feed_trucks(
-                ConveyorId, Pid, 1, spawn(?MODULE, truck, [self(), ConveyorId, 1, 10])
+                ConveyorId, Pid, MaxTruckCapacity, TruckCount, 
+                spawn(?MODULE, truck, [self(), ConveyorId, TruckCount, TruckCapacity])
             )
     end.
     
-feed_trucks(ConveyorId, FactoryPid, TruckCount, CurrentTruckPid) -> 
+feed_trucks(ConveyorId, FactoryPid, MaxTruckCapacity, TruckCount, CurrentTruckPid) -> 
     receive
         {FactoryPid, finish}  -> 
             io:format("[ Conveyor Belt ~p ] Received 'No more package signal' from Factory~n", [ConveyorId]),
@@ -77,11 +79,15 @@ feed_trucks(ConveyorId, FactoryPid, TruckCount, CurrentTruckPid) ->
                [ConveyorId, ConveyorId, TruckCount]
              ),
             % TODO: Generate truck capacity randomly
+            TruckCapacity = rand:uniform(MaxTruckCapacity),
             feed_trucks(
-              ConveyorId, FactoryPid, 
-              TruckCount + 1, spawn(?MODULE, truck, [self(), ConveyorId, TruckCount + 1, 10])
+              ConveyorId, FactoryPid, MaxTruckCapacity,
+              TruckCount + 1, spawn(?MODULE, truck, [self(), ConveyorId, TruckCount + 1, TruckCapacity])
             );
-        {CurrentTruckPid, next_package} -> feed_trucks(ConveyorId, FactoryPid, TruckCount, CurrentTruckPid)
+        {CurrentTruckPid, next_package} -> 
+            feed_trucks(
+                ConveyorId, FactoryPid, MaxTruckCapacity, TruckCount, CurrentTruckPid
+            )
     end.
 
 
@@ -89,7 +95,7 @@ feed_trucks(ConveyorId, FactoryPid, TruckCount, CurrentTruckPid) ->
 % Truckthings %
 %%%%%%%%%%%%%%%
 truck(ConveyorPid, ConveyorId, TruckId, TruckCapacity) -> 
-    io:format("[ Truck ~p-~p ] Starting~n", [ConveyorId, TruckId]),
+    io:format("[ Truck ~p-~p ] Starting with capacity for ~p packages~n", [ConveyorId, TruckId, TruckCapacity]),
     consume_packages(ConveyorPid, ConveyorId, TruckId, TruckCapacity),
     io:format("[ Truck ~p-~p ] Departing...~n", [ConveyorId, TruckId]).
 
